@@ -1,0 +1,419 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+
+TIME SERIES MODELLING - Number of Divorces 
+
+```{r}
+# load the relevant libraries
+library(tidyverse)
+library(TTR)
+library(forecast)
+library(tseries)
+library(readxl)
+```
+
+```{r}
+# load the file
+file_path = 'Vital statistics in the UK.xlsx'
+sheet_name = 'Divorce'
+
+divorce <- read_excel(file_path, sheet = sheet_name, skip=5)
+head(divorce)
+```
+
+
+We are gonna model the time series of divorces in United Kingdom
+
+```{r}
+# remove any observations that have ":" in United Kingdom
+divorce <- divorce %>% 
+  filter(`United Kingdom` != ":")
+
+head(divorce)
+```
+
+Some EDA
+
+```{r}
+str(divorce)
+```
+
+Looks like the number of divorces aren't numeric, so we have to change the type to numeric
+
+```{r}
+# change the dtype to numeric and sort the dates in ascending order
+divorce <- divorce %>%
+  select(Year, `United Kingdom`) %>% 
+  mutate(`United Kingdom` = as.numeric(`United Kingdom`)) %>% 
+  arrange(Year)  # Sort the year from 1971 to 2020
+
+str(divorce)
+```
+
+```{r}
+# get the summary statistics
+summary(divorce)
+```
+
+
+```{r}
+# check for missing values
+sum(is.na(divorce))
+# check for duplicates
+sum(duplicated(divorce))
+```
+No missing values and duplicates
+
+
+
+```{r}
+divorce %>% 
+  ggplot(aes(x=Year, y=`United Kingdom`))+
+  geom_point()+
+  geom_line()+
+  labs(title="Divorces in the United Kingdom (1971-2020)", y="Number of Divorces")+
+  theme_bw()
+```
+
+
+Convert Divorce to a time series
+```{r}
+# Frequency is year by year -> 1, start = 1971
+divorce_ts = ts(divorce$`United Kingdom`, frequency = 1, start = c(1971))
+divorce_ts
+```
+
+Plot the time series
+```{r}
+plot.ts(divorce_ts, main='Time Series of Divorces in the UK (1971-2020)', 
+        ylab='Number of Divorces')
+```
+Observations: No seasonality, but there is a trend and some random noise.
+Can probably be described by an additive model.
+
+Since there is no seasonality, we apply the decompose function, but we can extract and view the trend with
+a Simple Moving Average.
+
+
+Simple Moving Average  -- to estimate the trend
+```{r}
+sma_divorce <- SMA(divorce_ts, n=5)
+plot.ts(sma_divorce, main="Estimated Trend of Divorces in the UK", 
+        ylab='Number of Divorces')
+```
+Observations: The SMA trend shows the number of divorces in the United Kingdom rose steadily from the 1970s to about 1995, 
+and then started decreasing. 
+
+
+MODEL 1
+
+FORECASTING - EXPONENTIAL SMOOTHING
+Since the time series shows a clear trend and no seasonal components, we will use Holts Exponential Smoothing 
+with alpha & beta parameters to estimate the time series
+
+```{r}
+# get the initial value and slope
+initial_value <- divorce_ts[1]
+slope <- divorce_ts[2] - initial_value
+print(c(initial_value, slope))
+```
+
+```{r}
+# fit a predictive model on the time series with Holt Winters
+divorce_forecast_hw <- HoltWinters(divorce_ts, l.start = initial_value, 
+                                   b.start = slope, gamma = FALSE)
+divorce_forecast_hw
+```
+Alpha (0.7163539): This is the smoothing parameter for the level component.
+A value close to 1 indicates that the model gives more weight to recent observations, making it highly responsive to recent changes
+
+Beta (0.9942052): This is the smoothing parameter for the trend component. Very high value suggests that the estimate of the trend component
+is based on the most recent observations
+
+```{r}
+# sum of squares errors
+divorce_forecast_hw$SSE
+```
+
+Plot the in-sample forecast
+```{r}
+plot(divorce_forecast_hw, main='Holts Exponential Smoothing (In-Sample Forecast)')
+```
+The in-sample forecasts looks like a decent fit, but it is slightly off in a few areas.
+
+Plot a 10 year forecast of the Holt model 
+```{r}
+divorce_forecast_hw_10 <- forecast(divorce_forecast_hw, h=10)
+divorce_forecast_hw_10
+```
+The ten year forecast show a slight increase in the number of divorces yearly from 2021 to 2030.
+
+```{r}
+plot(divorce_forecast_hw_10, main="Holts Exponential Smoothing - 10 Year Forecast",
+     xlab="Year", ylab="Number of Divorces")
+```
+The ten year forecast show a slight increase in the number of divorces yearly from 2021 to 2030.
+
+Check whether the predictive model is good by checking the auto correlations
+
+```{r}
+# plot the acf correlogram
+acf(na.omit(divorce_forecast_hw_10$residuals), lag.max=20, na.action=na.pass)
+```
+The ACF correlogram shows no significant spikes that exceed the bounds at any lag, suggesting that there are no significant auto correlations.
+
+Ljung-Box test
+```{r}
+# Ljung box test
+Box.test(na.omit(divorce_forecast_hw_10$residuals), lag=20, type="Ljung-Box")
+```
+The p-value for Ljung-Box test is greater than 0.05, we fail to the null hypothesis that the residuals are uncorrelated.
+This further confirms that the Holt model has no significant auto correlations.
+
+
+Check if forecast errors have constant variance over time, and are normally distributed with mean zero
+```{r}
+# Function to plot the histogram distribution of the forecast errors in red, overlaid with a normal distribution curve in blue
+# Copied from the book "A little book of R for time series" by Avril Coghlan
+# Coghlan, A. (2018). A little book of R for time series. Creative Commons Attribution 3.0 License
+
+plotForecastErrors <- function(forecasterrors)
+{
+# make a histogram of the forecast errors:
+mybinsize <- IQR(forecasterrors)/4
+mysd <- sd(forecasterrors)
+mymin <- min(forecasterrors) - mysd*5
+mymax <- max(forecasterrors) + mysd*3
+# generate normally distributed data with mean 0 and standard deviation mysd
+mynorm <- rnorm(10000, mean=0, sd=mysd)
+mymin2 <- min(mynorm)
+mymax2 <- max(mynorm)
+if (mymin2 < mymin) { mymin <- mymin2 }
+if (mymax2 > mymax) { mymax <- mymax2 }
+# make a red histogram of the forecast errors, with the normally distributed data overlaid:
+mybins <- seq(mymin, mymax, mybinsize)
+hist(forecasterrors, col="red", freq=FALSE, breaks=mybins)
+# freq=FALSE ensures the area under the histogram = 1
+# generate normally distributed data with mean 0 and standard deviation mysd
+myhist <- hist(mynorm, plot=FALSE, breaks=mybins)
+# plot the normal curve as a blue line on top of the histogram of forecast errors:
+points(myhist$mids, myhist$density, type="l", col="blue", lwd=2)
+}
+```
+
+
+```{r}
+# plot time series of the residuals
+plot.ts(divorce_forecast_hw_10$residuals, ylab="Divorce Forecast Residuals",
+        main="Holts Exponential Smoothing Forecast Residuals")
+```
+The plot of the forecast residuals show that the variance appear to be roughly constant over time.
+
+```{r}
+# plot the histogram distribution of the forecast errors overlaid by a normal distribution curve
+divorce_forecast_hw_10$residuals <- 
+  divorce_forecast_hw_10$residuals[!is.na(divorce_forecast_hw_10$residuals)]
+plotForecastErrors(divorce_forecast_hw_10$residuals)
+```
+The distribution is roughly centered around 0 and it looks normally distributed.
+
+Therefore, it is plausible that the forecast errors are normally distributed with mean zero and constant variance.
+
+Since forecast errors also have no significant auto correlations, and the forecast errors appear to be normally distributed
+with mean zero and constant variance, the Holt Exponential Smoothing model seems to provide an adequate predictive 
+model for the number of divorces in the United Kingdom.
+
+
+
+
+ARIMA MODELS
+
+1. Check for stationarity
+```{r}
+plot.ts(divorce_ts, ylab='Number of Divorces', 
+        main='Time Series of Divorces in the UK (1971-2020)')
+```
+The trend shows that the series is clearly not stationary. 
+
+But to confirm, we run Augmented Dickey-Fuller (ADF) test
+Null Hypothesis (H0): The time series has a unit root, this means that it is non-stationary.
+
+Alternative Hypothesis (H1): The time series does not have a unit root, this means that it is stationary.
+```{r}
+# run the ADF test
+adf.test(divorce_ts)
+```
+p-value is 0.373 which is > 0.05 so we fail to reject the null hypothesis. Indicating that the series is not stationary.
+
+So we apply differencing
+```{r}
+# apply differencing of 2 orders
+divorce_ts_diff2 <- diff(divorce_ts, differences = 2)
+plot.ts(divorce_ts_diff2, ylab='Number of Divorces (Difference 2)', 
+        main='Differenced Time Series of Divorces in the UK (1971-2020)')
+```
+The time series appear to be stationary in mean and variance, but we can confirm it with the ADF test
+
+```{r}
+# run the ADF test
+adf.test(divorce_ts_diff2)
+```
+p-value is less than 0.05 so we reject the null hypothesis and accept the Alternative Hypothesis that the time series is Stationary.
+
+
+In order to decide on which ARIMA model to use,
+Plot the correlograms
+```{r}
+# plot the ACF
+acf(divorce_ts_diff2, lag.max = 20)
+```
+The ACF plot shows that there is 1 spike at lag 1 that exceeds the significance bounds, but all other lags autocorrelations do not exceed the bounds, so ARMA(0,1) seems plausible.
+
+```{r}
+# Plot the PACF
+pacf(divorce_ts_diff2, lag.max = 20)
+```
+The PACF plots show 1 auto correlation that passes the significance bounds at lag 1, but the other auto correlations for lages 2-20 do not exceed the bounds. ARMA(1,0) seems like a good model.
+
+So we can pick either ARMA(0,1) OR ARMA(1,0) for our second model
+
+MODEL 2 
+
+ARMA(1,0) model (with p=1, q=0) can be modelled using ARIMA(1,2,0) model (with p=1, d=2, q=0)
+d = 2 (differencing of 2 orders)
+
+```{r}
+# Modelling with ARIMA(1,2,0)
+divorce_arima_1 <- arima(divorce_ts, order = c(1,2,0))
+divorce_arima_1
+```
+X_t - mu = Beta1 * (X_t-1 - mu) + Z_t,
+• where X_t is the stationary time series we are studying (the time series of number of divorces in the UK),
+• mu is the mean of time series X_t,
+• Beta1 is the parameter to be estimated, in this case, it is ar1 = -0.8128,
+• and Z_t is white noise with mean zero and constant variance.
+
+
+
+10 year forecast for 95% confidence level
+```{r}
+# plot the 10 year forecast
+divorce_forecast_arima_1_10 <- forecast(divorce_arima_1, h=10, level = c(95))
+plot(divorce_forecast_arima_1_10, xlab="Year", ylab="Number of Divorces")
+```
+The forecast also shows a steady increase in the number of divorces from 2021 to 2030
+
+Check the forecast residuals if they are correlated
+```{r}
+# plot the acf correlogram
+acf(na.omit(divorce_forecast_arima_1_10$residuals), lag.max=20, na.action=na.pass)
+```
+The correlofram shows that there are auto correlations at any lags from 1-20 that exceed the significance bounds.
+
+Ljung-Box test
+```{r}
+# Ljung box test
+Box.test(na.omit(divorce_forecast_arima_1_10$residuals), lag=20, type="Ljung-Box")
+```
+p-value = 0.8119 > 0.05, which further confirms that there are no significant auto correlations for lags 1-20.
+
+```{r}
+# plot time series of the residuals
+plot.ts(divorce_forecast_arima_1_10$residuals, ylab="Divorce Forecast Residuals", 
+        main="ARIMA(1,2,0) Forecast Residuals")
+```
+The plot of the forecast residuals show that the variance appears to be roughly constant over time.
+
+```{r}
+# plot the histogram distribution of the forecast errors overlaid by a normal distribution curve
+divorce_forecast_arima_1_10$residuals <- 
+  divorce_forecast_arima_1_10$residuals[!is.na(divorce_forecast_arima_1_10$residuals)]
+plotForecastErrors(divorce_forecast_arima_1_10$residuals)
+```
+The histogram distribution of the forecast errors is roughly centered around 0 and it is approximatedly normally distributed.
+
+Therefore, it is plausible that the forecast errors are normally distributed with mean zero and constant variance.
+
+Since forecast errors also have no significant auto correlations, and the forecast errors appear to be normally distributed
+with mean zero and constant variance, the ARIMA(1,2,0) seems to provide an adequate predictive model for the
+number of divorces in the United Kingdom
+
+
+
+MODEL 3: Use Auto arima to find best model
+
+```{r}
+# use auto arima to find a model
+auto.arima(divorce_ts, ic='bic')
+```
+p = 1, q = 1, d = 2
+
+
+ARIMA(1,2,1)
+```{r}
+# forecasting with ARIMA(1,2,1)
+divorce_arima_2 <- arima(divorce_ts, order = c(1,2,1))
+divorce_arima_2
+```
+beta = ar1 = -0.5617
+theta = ma1 = -0.8013
+
+
+
+10 year forecast for 95% confidence level
+```{r}
+# plot the 10 year forecast
+divorce_forecast_arima_2_10 <- forecast(divorce_arima_2, h=10, level = c(95))
+plot(divorce_forecast_arima_2_10, xlab="Year", ylab="Number of Divorces")
+```
+The forecast shows the number of divorces decrease steadily from 2021 to 2030.
+
+Check the forecast residuals
+```{r}
+# plot the acf correlogram
+acf(na.omit(divorce_forecast_arima_2_10$residuals), lag.max=20, na.action=na.pass)
+```
+The correlogram shows that no auto correlations from lag 1-20 exceeds the significance bounds.
+
+Ljung-Box test
+```{r}
+# Ljung box test
+Box.test(na.omit(divorce_forecast_arima_2_10$residuals), lag=20, type="Ljung-Box")
+```
+p-value = 0.8342 which is > 0.05. further confirming that there are no significant auto correlations.
+
+```{r}
+# plot time series of the residuals
+plot.ts(divorce_forecast_arima_2_10$residuals, main="ARIMA(1,2,1) Forecast Residuals", 
+        ylab="Divorce Forecast Residuals")
+```
+The plot of the forecast residuals show that the variance appears to be roughly constant over time.
+
+```{r}
+# plot the histogram distribution of the forecast errors overlaid by a normal distribution curve
+divorce_forecast_arima_2_10$residuals <- 
+  divorce_forecast_arima_2_10$residuals[!is.na(divorce_forecast_arima_2_10$residuals)]
+plotForecastErrors(divorce_forecast_arima_2_10$residuals)
+```
+The histogram distribution of the forecast errors is roughly centered around 0 and it is approximately normally distributed.
+
+Therefore, it is plausible that the forecast errors are normally distributed with mean zero and constant variance.
+
+Since forecast errors also have no significant auto correlations, and the forecast errors appear to be normally distributed with mean zero and constant variance, the ARIMA(1,2,1) seems to provide an adequate predictive model for the number of divorces in the United Kingdom.
+
+```{r}
+# Get the metrics of the ARIMA(1,2,0) model
+accuracy(divorce_arima_1)
+```
+
+
+```{r}
+# Get the metrics of the ARIMA(1,2,1) model
+accuracy(divorce_arima_2)
+```
+
+ARIMA(1,2,1) has lower RMSE, MAPE and AIC so it is the better model.
+
