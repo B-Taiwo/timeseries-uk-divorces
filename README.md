@@ -20,11 +20,12 @@ git clone https://github.com/B-Taiwo/timeseries-uk-divorces.git
 ```R
 install.packages(c("forecast", "tidyverse", "tseries", "TTR"))
 ```
-3. Run the Analysis: Open the provided R notebook (divorces timeseries.Rmd) and run it in your R environment. The script includes:
+3. Run the Analysis: Open the provided R notebook `divorces timeseries.Rmd` and run it in your R environment. The script includes:
 - Data loading and preprocessing
 - Time series decomposition
 - Model fitting for Holt-Winters and ARIMA
 - Model evaluation and comparison
+4. View the final report: The final report in the directory can be viewed in PDF format `divorce-timeseries.pdf`.
 
 ## Project Results
 - Forecasting Models: Among the tested models, ARIMA (1,2,1) was the best. It captured the structure of the time series 
