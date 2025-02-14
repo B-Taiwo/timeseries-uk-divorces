@@ -15,7 +15,6 @@ R Libraries:
 1. Clone the Repository:
 ```bash
 git clone https://github.com/B-Taiwo/timeseries-uk-divorces.git
-cd divorce-time-series-forecast
 ```
 2. Install the Required R Libraries: Open your R console or RStudio and install the necessary libraries by running:
 ```R
