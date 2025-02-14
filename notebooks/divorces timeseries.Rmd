@@ -17,7 +17,7 @@ library(readxl)
 
 ```{r}
 # load the file
-file_path = 'Vital statistics in the UK.xlsx'
+file_path = 'data/Vital statistics in the UK.xlsx'
 sheet_name = 'Divorce'
 
 divorce <- read_excel(file_path, sheet = sheet_name, skip=5)
